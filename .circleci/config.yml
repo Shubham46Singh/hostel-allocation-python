@@ -1,4 +1,3 @@
-
 version: 2.1
 
 jobs:
@@ -125,6 +124,7 @@ jobs:
       - run:
           name: Verify Docker Hub credentials
           command: |
+            set -e
             test -n "$DOCKERHUB_USERNAME"
             test -n "$DOCKERHUB_TOKEN"
 
@@ -136,20 +136,24 @@ jobs:
               --password-stdin
 
       - run:
-          name: Build and push QA image
+          name: Build and push versioned Docker image
           command: |
-            set -e
+            set -euo pipefail
 
             IMAGE="$DOCKERHUB_USERNAME/hostel-allocation-python"
             TAG="${CIRCLE_SHA1:0:7}"
 
+            echo "Building image for commit: $CIRCLE_SHA1"
+
             docker build \
-              -t "$IMAGE:qa" \
+              -t "$IMAGE:$TAG" \
               -t "$IMAGE:qa-$TAG" \
+              -t "$IMAGE:qa" \
               .
 
-            docker push "$IMAGE:qa"
+            docker push "$IMAGE:$TAG"
             docker push "$IMAGE:qa-$TAG"
+            docker push "$IMAGE:qa"
 
 workflows:
   hostel-pipeline:
