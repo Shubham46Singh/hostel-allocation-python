@@ -74,6 +74,12 @@ jobs:
             cat /tmp/hostel-api.log
             exit 1
 
+      - setup_remote_docker
+
+      - run:
+          name: Build Docker image
+          command: docker build -t hostel-allocation:${CIRCLE_SHA1} .
+
 workflows:
   test:
     jobs:
