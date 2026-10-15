@@ -42,24 +42,37 @@ jobs:
           command: python .circleci/migrate.py
 
       - run:
-          name: Start FastAPI application
+          name: Start API and run all tests
           command: |
-            python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
-              > /tmp/hostel-api.log 2>&1 &
+            python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/hostel-api.log 2>&1 &
+            API_PID=$!
+
+            cleanup() {
+              kill "$API_PID" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+
             for attempt in $(seq 1 30); do
               if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)" 2>/dev/null; then
                 echo "FastAPI is ready."
-                exit 0
+
+                python -m pytest -v
+                TEST_STATUS=$?
+
+                if [ "$TEST_STATUS" -ne 0 ]; then
+                  echo "API server logs:"
+                  cat /tmp/hostel-api.log
+                fi
+
+                exit "$TEST_STATUS"
               fi
+
               sleep 2
             done
-            cat /tmp/hostel-api.log
-            echo "FastAPI failed to start."
-            exit 1
 
-      - run:
-          name: Run all tests
-          command: python -m pytest -v
+            echo "FastAPI failed to start."
+            cat /tmp/hostel-api.log
+            exit 1
 
 workflows:
   test:
