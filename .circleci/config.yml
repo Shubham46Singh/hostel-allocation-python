@@ -36,7 +36,7 @@ jobs:
       - run:
           name: Wait for PostgreSQL and Redis
           command: |
-            python - <<'PY'
+            python - \<<'PY'
             import os
             import time
             import psycopg
