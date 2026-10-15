@@ -1,7 +1,6 @@
 ﻿from app.allocate import (
     allocate,
     is_viable_occupancy,
-    merit_key,
     mutual_pairs,
     one_way_requests,
     rank_students,
