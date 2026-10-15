@@ -4,6 +4,16 @@ jobs:
   build-and-test:
     docker:
       - image: cimg/python:3.12
+      - image: postgres:16.4-alpine
+        environment:
+          POSTGRES_DB: hostel
+          POSTGRES_USER: hostel
+          POSTGRES_PASSWORD: hostel_dev_password
+      - image: redis:7.4.0-alpine
+
+    environment:
+      DATABASE_URL: postgresql://hostel:hostel_dev_password@localhost:5432/hostel
+      REDIS_URL: redis://localhost:6379/0
 
     steps:
       - checkout
@@ -16,12 +26,74 @@ jobs:
             python -m pip install pytest pytest-cov ruff httpx
 
       - run:
-          name: Run Ruff checks
+          name: Check code quality
           command: python -m ruff check .
 
       - run:
           name: Run allocation unit tests
           command: python -m pytest tests/test_allocate.py tests/test_allocation_flow.py -v
+
+      - run:
+          name: Wait for PostgreSQL and Redis
+          command: |
+            python - <<'PY'
+            import os
+            import time
+            import psycopg
+            import redis
+
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                try:
+                    with psycopg.connect(os.environ["DATABASE_URL"], connect_timeout=3) as conn:
+                        conn.execute("SELECT 1")
+                    redis.Redis.from_url(
+                        os.environ["REDIS_URL"], socket_connect_timeout=3
+                    ).ping()
+                    print("PostgreSQL and Redis are ready.")
+                    break
+                except Exception as exc:
+                    print(f"Waiting for services: {exc}")
+                    time.sleep(2)
+            else:
+                raise RuntimeError("PostgreSQL or Redis did not become ready.")
+            PY
+
+      - run:
+          name: Apply database migrations and seed data
+          command: |
+            python - <<'PY'
+            import os
+            from pathlib import Path
+            import psycopg
+
+            with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+                for path in sorted(Path("migrations").glob("*.sql")):
+                    print(f"Applying {path}")
+                    conn.execute(path.read_text(encoding="utf-8"), prepare=False)
+            print("Migrations and seed data applied.")
+            PY
+
+      - run:
+          name: Start FastAPI application
+          command: |
+            python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+              > /tmp/hostel-api.log 2>&1 &
+            for attempt in $(seq 1 30); do
+              if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)" 2>/dev/null; then
+                echo "FastAPI is ready."
+                exit 0
+              fi
+              sleep 2
+            done
+            cat /tmp/hostel-api.log
+            echo "FastAPI failed to start."
+            exit 1
+          background: true
+
+      - run:
+          name: Run all tests
+          command: python -m pytest -v
 
 workflows:
   test:
