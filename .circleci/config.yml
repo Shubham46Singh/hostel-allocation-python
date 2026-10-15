@@ -80,6 +80,28 @@ jobs:
           name: Build Docker image
           command: docker build -t hostel-allocation:${CIRCLE_SHA1} .
 
+      - run:
+          name: Log in to Docker Hub
+          command: |
+            echo "$DOCKERHUB_TOKEN" | docker login \
+              --username "$DOCKERHUB_USERNAME" \
+              --password-stdin
+
+      - run:
+          name: Tag Docker image
+          command: |
+            docker tag hostel-allocation:${CIRCLE_SHA1} \
+              ${DOCKERHUB_USERNAME}/hostel-allocation-python:${CIRCLE_SHA1}
+
+            docker tag hostel-allocation:${CIRCLE_SHA1} \
+              ${DOCKERHUB_USERNAME}/hostel-allocation-python:latest
+
+      - run:
+          name: Push Docker image to Docker Hub
+          command: |
+            docker push ${DOCKERHUB_USERNAME}/hostel-allocation-python:${CIRCLE_SHA1}
+            docker push ${DOCKERHUB_USERNAME}/hostel-allocation-python:latest
+
 workflows:
   test:
     jobs:
