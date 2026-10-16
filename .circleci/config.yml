@@ -1,3 +1,4 @@
+
 version: 2.1
 
 jobs:
@@ -118,7 +119,6 @@ jobs:
 
     steps:
       - checkout
-
       - setup_remote_docker
 
       - run:
@@ -155,6 +155,90 @@ jobs:
             docker push "$IMAGE:qa-$TAG"
             docker push "$IMAGE:qa"
 
+  promote-staging:
+    docker:
+      - image: cimg/base:current
+
+    steps:
+      - checkout
+      - setup_remote_docker
+
+      - run:
+          name: Verify Docker Hub credentials
+          command: |
+            set -e
+            test -n "$DOCKERHUB_USERNAME"
+            test -n "$DOCKERHUB_TOKEN"
+
+      - run:
+          name: Login to Docker Hub
+          command: |
+            echo "$DOCKERHUB_TOKEN" | docker login \
+              --username "$DOCKERHUB_USERNAME" \
+              --password-stdin
+
+      - run:
+          name: Promote the tested image to staging
+          command: |
+            set -euo pipefail
+
+            IMAGE="$DOCKERHUB_USERNAME/hostel-allocation-python"
+            TAG="${CIRCLE_SHA1:0:7}"
+
+            echo "Promoting existing image: $IMAGE:$TAG"
+
+            docker pull "$IMAGE:$TAG"
+
+            docker tag "$IMAGE:$TAG" "$IMAGE:staging-$TAG"
+            docker tag "$IMAGE:$TAG" "$IMAGE:staging"
+
+            docker push "$IMAGE:staging-$TAG"
+            docker push "$IMAGE:staging"
+
+            echo "Staging promotion complete."
+
+  promote-production:
+    docker:
+      - image: cimg/base:current
+
+    steps:
+      - checkout
+      - setup_remote_docker
+
+      - run:
+          name: Verify Docker Hub credentials
+          command: |
+            set -e
+            test -n "$DOCKERHUB_USERNAME"
+            test -n "$DOCKERHUB_TOKEN"
+
+      - run:
+          name: Login to Docker Hub
+          command: |
+            echo "$DOCKERHUB_TOKEN" | docker login \
+              --username "$DOCKERHUB_USERNAME" \
+              --password-stdin
+
+      - run:
+          name: Promote the same image to production
+          command: |
+            set -euo pipefail
+
+            IMAGE="$DOCKERHUB_USERNAME/hostel-allocation-python"
+            TAG="${CIRCLE_SHA1:0:7}"
+
+            echo "Promoting existing image: $IMAGE:$TAG"
+
+            docker pull "$IMAGE:$TAG"
+
+            docker tag "$IMAGE:$TAG" "$IMAGE:prod-$TAG"
+            docker tag "$IMAGE:$TAG" "$IMAGE:prod"
+
+            docker push "$IMAGE:prod-$TAG"
+            docker push "$IMAGE:prod"
+
+            echo "Production promotion complete."
+
 workflows:
   hostel-pipeline:
     jobs:
@@ -165,5 +249,26 @@ workflows:
             - test
           filters:
             branches:
-              only:
-                - main
+              only: main
+
+      - promote-staging:
+          requires:
+            - build-image
+          filters:
+            branches:
+              only: main
+
+      - approve-production:
+          type: approval
+          requires:
+            - promote-staging
+          filters:
+            branches:
+              only: main
+
+      - promote-production:
+          requires:
+            - approve-production
+          filters:
+            branches:
+              only: main
