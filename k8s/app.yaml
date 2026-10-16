@@ -17,7 +17,7 @@ spec:
           image: vedanth02/hostel-allocation-python:latest
           imagePullPolicy: Always
           ports:
-            - containerPort: 8000
+            - containerPort: 8080
           env:
             - name: DATABASE_URL
               value: postgresql://hostel:hostel_dev_password@db:5432/hostel
@@ -26,18 +26,18 @@ spec:
           startupProbe:
             httpGet:
               path: /docs
-              port: 8000
+              port: 8080
             failureThreshold: 30
             periodSeconds: 5
           readinessProbe:
             httpGet:
               path: /health
-              port: 8000
+              port: 8080
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /docs
-              port: 8000
+              port: 8080
             periodSeconds: 20
 ---
 apiVersion: v1
@@ -49,5 +49,5 @@ spec:
   selector:
     app: hostel-allocation
   ports:
-    - port: 8000
-      targetPort: 8000
+    - port: 8080
+      targetPort: 8080

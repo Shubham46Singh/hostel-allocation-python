@@ -12,7 +12,6 @@ from app.main import app
 
 
 
-
 @pytest.fixture
 def client():
     """Test the FastAPI app in-process using real PostgreSQL and Redis."""
