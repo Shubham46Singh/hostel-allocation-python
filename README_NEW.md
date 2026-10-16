@@ -1,87 +1,160 @@
 # Hostel Room Allocation System
 
-A containerized hostel room allocation application built with **Python 3.12, FastAPI, PostgreSQL, and Redis**, with automated testing and image publishing through CircleCI and deployment on Kubernetes using Minikube.
+A containerized hostel room allocation system built with **Python 3.12, FastAPI, PostgreSQL, and Redis**, featuring automated testing, CI/CD with CircleCI, Docker Hub image publishing, and Kubernetes deployment using Minikube.
 
 ## 📌 Project Overview
 
-The Hostel Room Allocation System assigns students to hostel rooms according to merit, seniority, room preferences, floor preferences, and mutually agreed roommate requests.
+The Hostel Room Allocation System automates the allocation of hostel rooms to students based on academic merit, seniority, room preferences, floor preferences, and mutually agreed roommate requests.
 
-The application processes allocation requests in the background, tracks progress using Redis, stores persistent data in PostgreSQL, and provides REST API endpoints for accessing students, rooms, allocation runs, and results.
+The application provides a REST API for managing students, viewing rooms, updating preferences, initiating allocation runs, tracking execution progress, and retrieving allocation results.
+
+PostgreSQL stores persistent application data, while Redis tracks allocation progress and supports temporary run-state storage. Docker packages the application and its dependencies, CircleCI automates the build and validation workflow, and Kubernetes manages the application across separate QA, Stage, and Production environments.
 
 ## 🛠️ Technology Stack
 
 | Technology | Purpose |
 |---|---|
 | Python 3.12 | Application runtime |
-| FastAPI | REST API framework |
-| PostgreSQL | Persistent data storage |
-| Redis | Allocation progress tracking |
-| pytest | Automated testing |
+| FastAPI | REST API development |
+| PostgreSQL 16 | Persistent database |
+| Redis 7 | Allocation progress and temporary run-state tracking |
+| pytest | Automated unit and integration testing |
+| Ruff | Python linting and code quality |
 | Docker | Application containerization |
-| Docker Compose | Local multi-container setup |
+| Docker Compose | Local multi-container orchestration |
 | CircleCI | Continuous integration and delivery |
 | Docker Hub | Container image registry |
-| Kubernetes | Container orchestration |
-| Minikube | Local Kubernetes environment |
+| Kubernetes | Deployment and orchestration |
+| Minikube | Local Kubernetes cluster |
 
 ## ✨ Features
 
-- View student records and room availability.
-- Update student room type and floor preferences.
+- Retrieve student records and room information.
+- Update student room-type and floor preferences.
 - Process allocation requests asynchronously.
 - Honour mutually agreed roommate requests.
-- Allocate students according to merit and seniority.
-- Track allocation progress and retrieve completed results.
-- Report students who could not receive their preferred arrangements.
-- Check application, PostgreSQL, and Redis health.
-- Run the application in Docker and Kubernetes.
+- Apply deterministic allocation rules for consistent results.
+- Rank students using merit, year of study, and student ID as tie-breakers.
+- Track allocation progress and retrieve completed allocation results.
+- Explain allocation disappointments, including when a student is `outranked` by another student.
+- Persist application data in PostgreSQL.
+- Use Redis for temporary allocation-run state and progress tracking.
+- Run health checks for the API, PostgreSQL, and Redis.
+- Containerize the application with Docker.
+- Automate validation and image publishing through CircleCI.
+- Deploy isolated application environments using Kubernetes.
 
 ## 🏗️ Application Architecture
 
-1. **FastAPI** receives requests and exposes the REST API.
-2. **PostgreSQL** stores persistent application and allocation data.
-3. **Redis** supports allocation progress tracking.
-4. **Docker** packages the application and its runtime dependencies.
-5. **CircleCI** automates the configured checks, tests, and image publishing workflow.
-6. **Docker Hub** stores the published application image.
-7. **Kubernetes on Minikube** runs the application alongside PostgreSQL and Redis.
+The application follows a containerized, service-oriented architecture.
+
+1. **FastAPI application:** Receives HTTP requests, validates inputs, executes allocation workflows, and returns JSON responses.
+2. **PostgreSQL:** Stores students, rooms, preferences, and persistent allocation data.
+3. **Redis:** Maintains temporary allocation-run state and supports progress tracking with a configurable time-to-live.
+4. **Database migrations:** Initialize and seed the database using ordered SQL migration files.
+5. **Docker:** Packages the Python application and its runtime dependencies into a reproducible container image.
+6. **Docker Compose:** Coordinates the application, database, Redis, and migration process for local execution.
+7. **CircleCI:** Automates the configured code-quality checks, tests, and container image publishing workflow.
+8. **Docker Hub:** Stores the published application image for use by deployment environments.
+9. **Kubernetes and Minikube:** Orchestrate the application, PostgreSQL, and Redis across QA, Stage, and Production namespaces.
+
+### Architecture flow
+
+```text
+                  Client / Swagger UI
+                          |
+                          v
+                     FastAPI API
+                     /         \
+                    v           v
+               PostgreSQL     Redis
+                    |
+                    v
+           Persistent allocation data
+
+        Source Code Repository
+                  |
+                  v
+               CircleCI
+                  |
+          Build and validate
+                  |
+                  v
+              Docker Hub
+                  |
+                  v
+          Kubernetes / Minikube
+             /      |      \
+            v       v       v
+           QA     Stage   Production
+```
 
 ## 🔗 REST API Endpoints
 
+The application exposes the following endpoints.
+
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/health` | Check application and service health |
-| GET | `/students` | Retrieve student information |
-| GET | `/rooms` | Retrieve room information |
-| PUT | `/students/{sid}/preferences` | Update student preferences |
-| POST | `/allocate` | Start an allocation run |
-| GET | `/runs/{run_id}` | Check allocation progress and results |
-| GET | `/allocation?run_id={run_id}` | Retrieve the saved allocation plan |
+| GET | `/health` | Checks application, PostgreSQL, and Redis health |
+| GET | `/students` | Retrieves student information |
+| GET | `/rooms` | Retrieves room information |
+| PUT | `/students/{sid}/preferences` | Updates an individual student's preferences |
+| POST | `/allocate` | Starts a new allocation run |
+| GET | `/runs/{run_id}` | Retrieves allocation-run status and results |
+| GET | `/allocation?run_id={run_id}` | Retrieves the allocation plan for a run |
 
-### API Documentation
+### API documentation
 
-When the application is running locally, access:
+When the application is accessible on local port 8080:
 
 - **Swagger UI:** http://localhost:8080/docs
 - **OpenAPI specification:** http://localhost:8080/openapi.json
-- **Health check:** http://localhost:8080/health
+- **Health endpoint:** http://localhost:8080/health
 
-## ⚙️ Prerequisites
+Swagger UI allows API endpoints to be explored and tested interactively.
 
-For the Docker-based workflow, install:
+## 🧠 Allocation Algorithm
+
+The allocation engine is implemented in `app/allocate.py`, separating the core allocation logic from the API and infrastructure layers.
+
+### 1. Student grouping
+
+Students requesting to stay together are grouped only when their roommate requests are mutual. A one-way request is not sufficient to form a roommate group.
+
+The grouping process respects room capacity, including the four-bed room constraint, and avoids placing a student alone in a four-bed room.
+
+### 2. Ranking and deterministic allocation
+
+Students are evaluated using a consistent ranking order:
+
+1. Higher merit ranks first.
+2. Year of study is used as the next tie-breaker.
+3. Student ID provides a final deterministic tie-breaker.
+
+The allocator applies these rules consistently so that equivalent inputs produce reproducible allocation results.
+
+### 3. Room and floor preferences
+
+The allocator considers students' preferred room types and floors while respecting room capacity and grouping constraints. When all preferences cannot be satisfied, the result records the relevant allocation outcome and disappointment reason.
+
+### 4. Allocation explanations
+
+The system provides information about students whose preferences could not be fulfilled.
+
+For example, a student may be marked as `outranked` when a higher-ranked student receives a limited room or placement opportunity first. The `blocked_by` information helps explain which competing allocation prevented a preferred placement.
+
+### 5. Allocation progress
+
+Allocation requests create a run that can be tracked using its run ID. Redis supports temporary run-state storage and progress reporting, with a configured run TTL of 3600 seconds. Persistent application and allocation data is maintained in PostgreSQL.
+
+## 🐳 Running Locally with Docker Compose
+
+### Prerequisites
+
+Install:
 
 - Git
 - Docker Desktop with Docker Compose
-- A Docker Hub account for publishing images
-
-For Kubernetes deployment, also install:
-
-- `kubectl`
-- Minikube
-
-Python 3.12 is required if you want to run the application directly outside its container.
-
-## 🐳 Running Locally with Docker Compose
 
 ### 1. Clone the repository
 
@@ -90,153 +163,266 @@ git clone https://github.com/vedanthn0202-byte/hostel-allocation-python.git
 cd hostel-allocation-python
 ```
 
-### 2. Build and start the application
+### 2. Build and start the services
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
-### 3. Check application health
+Docker Compose starts the application infrastructure, including PostgreSQL and Redis, and runs the database migration process according to the Compose configuration.
 
-Open another terminal and run:
+### 3. Check the running containers
+
+```bash
+docker compose ps
+```
+
+### 4. Verify application health
 
 ```bash
 curl http://localhost:8080/health
 ```
 
-A healthy response should report `status` as `ok`, with both `postgres` and `redis` set to `true`.
+A healthy response reports `status` as `ok`, with `postgres` and `redis` set to `true`.
 
-### 4. Open the API documentation
+### 5. Open Swagger UI
 
-Visit http://localhost:8080/docs in your browser.
+Visit http://localhost:8080/docs to explore and test the REST API.
 
-Follow the repository's Docker Compose configuration for service startup, environment variables, and database migrations.
+### 6. Stop the local services
 
-## 🧪 Testing
+```bash
+docker compose down
+```
 
-The project uses pytest for automated testing.
+This stops and removes the Compose containers and network. Persistent database storage is managed separately by the Compose configuration.
 
-Run the complete test suite:
+## 🧪 Automated Testing
+
+The project uses pytest to validate the allocation algorithm, API behaviour, and allocation workflow.
+
+### Run all tests
 
 ```bash
 python -m pytest -v
 ```
 
-Run allocation unit tests separately:
+### Run allocation unit tests
 
 ```bash
 python -m pytest tests/test_allocate.py -v
 ```
 
-Run API tests:
+### Run API tests
 
 ```bash
 python -m pytest tests/test_api.py -v
 ```
 
-The API tests require the dependencies and environment configured for the project's test setup.
+### Run allocation workflow tests
+
+```bash
+python -m pytest tests/test_allocation_flow.py -v
+```
+
+The test suite covers allocation constraints, mutual roommate requests, deterministic results, ranking behaviour, allocation explanations, and API workflows.
+
+Ruff is used for Python code-quality checks, and the CI workflow runs automated validation before publishing container images.
 
 ## 🔄 CI/CD with CircleCI and Docker Hub
 
-The project uses CircleCI to automate the configured build and validation workflow.
+The project integrates CircleCI with the source repository to automate the container build and publishing workflow.
 
-The pipeline covers the configured linting, unit testing, integration testing, secret scanning, Docker image building, and image publishing steps.
+The configured pipeline includes code-quality checks, automated tests, service and migration validation, and Docker image building and publishing.
 
-**Docker Hub image:** `vedanth02/hostel-allocation-python`
+### CI/CD workflow
 
-Example image tags include:
+1. A code change is pushed to a configured Git branch.
+2. CircleCI checks out the repository.
+3. Python code-quality checks and automated tests run.
+4. Required application services and database migrations are validated by the pipeline.
+5. Docker builds the application image.
+6. The image is published to Docker Hub when the publishing conditions are met.
 
-- `1.0`
+### Docker Hub image
+
+**Repository:** `vedanth02/hostel-allocation-python`
+
+Docker Hub repository: https://hub.docker.com/r/vedanth02/hostel-allocation-python
+
+The image is published for use in the Kubernetes deployment workflow. Environment-specific tags include:
+
 - `latest`
-- Commit-specific tags, when configured by the pipeline
+- `qa`
+- `stage`
+- `prod`
 
-**Docker Hub repository:** https://hub.docker.com/r/vedanth02/hostel-allocation-python
+The tags identify images intended for the respective deployment environments.
 
 ## ☸️ Kubernetes Deployment with Minikube
 
-The project includes Kubernetes manifests in the `k8s/` directory.
+The project uses Kubernetes to orchestrate the application and its supporting services locally through Minikube.
 
-The Kubernetes configuration runs the application with PostgreSQL and Redis. The application uses port `8080`, with startup, readiness, and liveness probes configured for the API.
+The deployment is organized into three namespaces:
+
+| Namespace | Purpose |
+|---|---|
+| `qa` | Quality assurance and functional validation |
+| `stage` | Pre-production validation |
+| `prod` | Production-style deployment |
+
+Each environment contains the Hostel Allocation application, PostgreSQL, and Redis. PostgreSQL storage is managed through persistent volume claims, and database migrations initialize the application schema.
 
 ### 1. Start Minikube
 
-```bash
+```powershell
 minikube start --driver=docker
 ```
 
-### 2. Apply the Kubernetes manifests
+### 2. Verify the cluster
 
-```bash
-kubectl apply -f ./k8s/
+```powershell
+kubectl get nodes
 ```
 
-### 3. Check deployment status
+The Minikube node should report `Ready`.
 
-```bash
-kubectl get deployments
-kubectl get services
-kubectl get pods
+### 3. Inspect environment deployments
+
+```powershell
+kubectl get deployments,pods -n qa
+kubectl get deployments,pods -n stage
+kubectl get deployments,pods -n prod
 ```
 
-### 4. Wait for the application deployment
+### 4. Check application services
 
-```bash
-kubectl rollout status deployment/hostel-allocation
+```powershell
+kubectl get services -n qa
+kubectl get services -n stage
+kubectl get services -n prod
 ```
 
-### 5. Forward the application port
+The application Service exposes port `8080` internally. PostgreSQL and Redis use ports `5432` and `6379`, respectively.
 
-```bash
-kubectl port-forward service/hostel-allocation 8080:8080
+### 5. Access the QA application
+
+Run the following command in a dedicated terminal:
+
+```powershell
+kubectl port-forward service/hostel-allocation 18081:8080 -n qa
 ```
 
-Keep the port-forward command running. Then open http://localhost:8080/docs or check application health:
+Keep that terminal open. In another terminal, run:
 
-```bash
-curl http://localhost:8080/health
+```powershell
+Invoke-RestMethod http://localhost:18081/health
 ```
 
-The Kubernetes application Service uses port `8080`; PostgreSQL uses port `5432`, and Redis uses port `6379` internally.
+Open Swagger UI at http://localhost:18081/docs.
 
-## 🧠 Allocation Rules
+### 6. Access the Stage application
 
-The allocator considers student merit, seniority, room preferences, floor preferences, and mutual roommate requests.
+Start the Stage port-forward:
 
-A one-way roommate request is not treated as mutual agreement. When preferences cannot all be satisfied, the allocation result reports relevant disappointments and reasons.
+```powershell
+kubectl port-forward service/hostel-allocation 18082:8080 -n stage
+```
 
-The allocation process also applies constraints to avoid leaving a student alone in a four-bed room.
+Health check:
+
+```powershell
+Invoke-RestMethod http://localhost:18082/health
+```
+
+Swagger UI: http://localhost:18082/docs
+
+### 7. Access the Production application
+
+Start the Production port-forward:
+
+```powershell
+kubectl port-forward service/hostel-allocation 18083:8080 -n prod
+```
+
+Health check:
+
+```powershell
+Invoke-RestMethod http://localhost:18083/health
+```
+
+Swagger UI: http://localhost:18083/docs
+
+Each port-forward runs in its own terminal and remains active until stopped with `Ctrl+C`.
+
+### 8. Check application rollout status
+
+```powershell
+kubectl rollout status deployment/hostel-allocation -n qa
+kubectl rollout status deployment/hostel-allocation -n stage
+kubectl rollout status deployment/hostel-allocation -n prod
+```
+
+These commands verify that the application deployments have completed their rollout.
+
+## 🗄️ Database and Configuration
+
+The application uses environment variables to connect to its supporting services:
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection URL |
+| `REDIS_URL` | Redis connection URL |
+
+Database schema and seed data are managed through SQL migration files in `migrations/`. The migration process runs before the application starts, according to the deployment configuration.
+
+Kubernetes Secrets provide database configuration where referenced by the manifests, while ConfigMaps can be used to provide non-sensitive configuration and migration files.
 
 ## 📁 Repository Structure
 
 ```text
 hostel-allocation-python/
-├── app/                  # FastAPI application and allocation logic
-├── tests/                # Unit and API tests
-├── migrations/           # SQL database migrations
-├── k8s/                  # Kubernetes manifests
-├── .circleci/            # CircleCI pipeline configuration
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-└── README.md
+├── app/
+│   ├── main.py                 # FastAPI routes and application setup
+│   ├── allocate.py             # Core allocation algorithm
+│   ├── db.py                   # PostgreSQL integration
+│   └── cache.py                # Redis integration
+├── tests/
+│   ├── test_allocate.py        # Allocation unit tests
+│   ├── test_api.py             # API tests
+│   └── test_allocation_flow.py # Allocation workflow tests
+├── migrations/                 # SQL schema and seed migrations
+├── k8s/                        # Kubernetes deployment manifests
+├── .circleci/
+│   └── config.yml              # CircleCI pipeline configuration
+├── Dockerfile                  # Application container image
+├── docker-compose.yml          # Local service orchestration
+├── requirements.txt            # Python dependencies
+└── README.md                   # Project documentation
 ```
 
 ## ✅ Project Status
 
-The application has been tested through its REST API, and the health endpoint has confirmed PostgreSQL and Redis connectivity.
+The Hostel Room Allocation System has been implemented and exercised through its API, containerized runtime, CI/CD pipeline, and Kubernetes deployment.
 
-The allocation workflow successfully placed all 20 students in a test run.
-
-The CircleCI pipeline has passed, the Docker image has been published, and the Kubernetes application, database, and Redis deployments have been verified as ready in Minikube.
+- The application exposes the documented REST API endpoints.
+- PostgreSQL and Redis connectivity is verified through the health endpoint.
+- The allocation workflow processes student records and returns allocation results.
+- The allocation algorithm applies mutual roommate requests, deterministic ranking, and room constraints.
+- Automated tests validate the core allocation logic and API workflows.
+- CircleCI has completed successful pipeline runs and published the Docker image.
+- QA, Stage, and Production Kubernetes environments have been deployed in Minikube.
+- Health checks have returned successful responses from all three environments, with PostgreSQL and Redis connectivity confirmed.
 
 ## 🚀 Future Improvements
 
-- Add monitoring and centralized logging.
-- Improve allocation reporting and visualization.
+- Introduce centralized application logging and monitoring dashboards.
 - Add authentication and role-based access control.
-- Deploy to a managed Kubernetes cluster.
-- Extend automated testing and coverage reporting.
+- Improve allocation-result visualization and reporting.
+- Extend automated coverage and performance testing.
+- Deploy to a managed cloud Kubernetes platform.
+- Add alerts and operational metrics for application and database health.
 
 ## 👨‍💻 Author
 
-Developed as a practical project to learn backend development, containerization, CI/CD automation, and Kubernetes deployment.
+Developed as a practical project demonstrating backend API development, database integration, containerization, automated testing, CI/CD automation, and Kubernetes deployment.
