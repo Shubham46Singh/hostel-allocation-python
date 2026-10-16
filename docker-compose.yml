@@ -57,7 +57,7 @@ services:
       DATABASE_URL: postgresql://hostel:hostel_dev_password@db:5432/hostel
       REDIS_URL: redis://redis:6379/0
     ports:
-      - "8000:8000"
+      - "8080:8080"
     restart: unless-stopped
 
 volumes:

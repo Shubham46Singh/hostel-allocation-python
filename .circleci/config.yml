@@ -61,7 +61,7 @@ jobs:
           name: Start API and run all tests with coverage
           command: |
             set -u
-            python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/hostel-api.log 2>&1 &
+            python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 > /tmp/hostel-api.log 2>&1 &
             API_PID=$!
 
             cleanup() {
@@ -70,7 +70,7 @@ jobs:
             trap cleanup EXIT
 
             for attempt in $(seq 1 30); do
-              if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)" 2>/dev/null; then
+              if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)" 2>/dev/null; then
                 echo "FastAPI is ready."
                 set +e
                 python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=70 -v
