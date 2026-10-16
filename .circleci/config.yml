@@ -1,7 +1,7 @@
 version: 2.1
 
 jobs:
-  build-and-test:
+  qa:
     docker:
       - image: cimg/python:3.12
       - image: postgres:16.4-alpine
@@ -19,6 +19,23 @@ jobs:
       - checkout
 
       - run:
+          name: Scan repository for secrets
+          command: |
+            set -eu
+            GITLEAKS_VERSION="8.24.2"
+            curl -sSfL \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+              -o /tmp/gitleaks.tar.gz
+            mkdir -p /tmp/gitleaks-bin
+            tar -xzf /tmp/gitleaks.tar.gz -C /tmp/gitleaks-bin gitleaks
+            /tmp/gitleaks-bin/gitleaks detect \
+              --source . \
+              --no-git \
+              --redact \
+              --exit-code 1 \
+              --gitleaks-ignore-path .
+
+      - run:
           name: Install application and test dependencies
           command: |
             python -m pip install --upgrade pip
@@ -31,7 +48,11 @@ jobs:
 
       - run:
           name: Run allocation unit tests
-          command: python -m pytest tests/test_allocate.py tests/test_allocation_flow.py -v
+          command: |
+            python -m pytest \
+              tests/test_allocate.py \
+              tests/test_allocation_flow.py \
+              -v
 
       - run:
           name: Wait for PostgreSQL and Redis
@@ -68,7 +89,6 @@ jobs:
 
                 exit "$TEST_STATUS"
               fi
-
               sleep 2
             done
 
@@ -76,24 +96,77 @@ jobs:
             cat /tmp/hostel-api.log
             exit 1
 
+      - setup_remote_docker
+
       - run:
-          name: Scan repository for secrets
+          name: Validate Docker Hub credentials
           command: |
             set -eu
-            GITLEAKS_VERSION="8.24.2"
-            curl -sSfL \
-              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-              -o /tmp/gitleaks.tar.gz
-            mkdir -p /tmp/gitleaks-bin
-            tar -xzf /tmp/gitleaks.tar.gz -C /tmp/gitleaks-bin gitleaks
-            /tmp/gitleaks-bin/gitleaks detect \
-              --source . \
-              --no-git \
-              --redact \
-              --exit-code 1 \
-              --gitleaks-ignore-path .
+            test -n "${DOCKERHUB_USER:-}" || {
+              echo "ERROR: DOCKERHUB_USER is missing."
+              exit 1
+            }
+            test -n "${DOCKERHUB_TOKEN:-}" || {
+              echo "ERROR: DOCKERHUB_TOKEN is missing."
+              exit 1
+            }
 
+      - run:
+          name: Log in to Docker Hub
+          command: |
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login \
+              --username "$DOCKERHUB_USER" \
+              --password-stdin
+
+      - run:
+          name: Build QA Docker image
+          command: |
+            docker build -t "hostel-allocation:${CIRCLE_SHA1}" .
+
+      - run:
+          name: Tag and push QA images
+          command: |
+            set -eu
+            IMAGE="${DOCKERHUB_USER}/hostel-allocation-python"
+            SHORT_SHA="$(printf '%s' "$CIRCLE_SHA1" | cut -c1-7)"
+
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:qa"
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:main-${SHORT_SHA}"
+
+            docker push "${IMAGE}:qa"
+            docker push "${IMAGE}:main-${SHORT_SHA}"
+
+  publish-image:
+    parameters:
+      environment_tag:
+        type: string
+
+    docker:
+      - image: cimg/base:stable
+
+    steps:
+      - checkout
       - setup_remote_docker
+
+      - run:
+          name: Validate Docker Hub credentials
+          command: |
+            set -eu
+            test -n "${DOCKERHUB_USER:-}" || {
+              echo "ERROR: DOCKERHUB_USER is missing."
+              exit 1
+            }
+            test -n "${DOCKERHUB_TOKEN:-}" || {
+              echo "ERROR: DOCKERHUB_TOKEN is missing."
+              exit 1
+            }
+
+      - run:
+          name: Log in to Docker Hub
+          command: |
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login \
+              --username "$DOCKERHUB_USER" \
+              --password-stdin
 
       - run:
           name: Build Docker image
@@ -101,61 +174,42 @@ jobs:
             docker build -t "hostel-allocation:${CIRCLE_SHA1}" .
 
       - run:
-          name: Log in to Docker Hub
+          name: Tag and push branch images
           command: |
             set -eu
+            IMAGE="${DOCKERHUB_USER}/hostel-allocation-python"
+            SHORT_SHA="$(printf '%s' "$CIRCLE_SHA1" | cut -c1-7)"
+            BRANCH_TAG="${CIRCLE_BRANCH}-${SHORT_SHA}"
+            ENV_TAG="<< parameters.environment_tag >>"
 
-            if [ "$CIRCLE_BRANCH" != "main" ] && [ "$CIRCLE_BRANCH" != "staging" ]; then
-              echo "Skipping Docker Hub login on branch: $CIRCLE_BRANCH"
-              exit 0
-            fi
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:${ENV_TAG}"
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:${BRANCH_TAG}"
 
-            if [ -z "${DOCKERHUB_TOKEN:-}" ]; then
-              echo "ERROR: DOCKERHUB_TOKEN is missing in CircleCI environment variables."
-              exit 1
-            fi
-
-            printf '%s' "$DOCKERHUB_TOKEN" | docker login \
-              --username "vedanth02" \
-              --password-stdin
-
-      - run:
-          name: Tag Docker image
-          command: |
-            set -eu
-
-            IMAGE="vedanth02/hostel-allocation-python"
-
-            if [ "$CIRCLE_BRANCH" = "staging" ]; then
-              docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:${CIRCLE_SHA1}"
-              docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:staging"
-            elif [ "$CIRCLE_BRANCH" = "main" ]; then
-              docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:${CIRCLE_SHA1}"
-              docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:latest"
-              docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:1.0"
-            else
-              echo "Skipping Docker image tagging on branch: $CIRCLE_BRANCH"
-            fi
-
-      - run:
-          name: Push Docker images to Docker Hub
-          command: |
-            set -eu
-
-            IMAGE="vedanth02/hostel-allocation-python"
-
-            if [ "$CIRCLE_BRANCH" = "staging" ]; then
-              docker push "${IMAGE}:${CIRCLE_SHA1}"
-              docker push "${IMAGE}:staging"
-            elif [ "$CIRCLE_BRANCH" = "main" ]; then
-              docker push "${IMAGE}:${CIRCLE_SHA1}"
-              docker push "${IMAGE}:latest"
-              docker push "${IMAGE}:1.0"
-            else
-              echo "Skipping Docker image publishing on branch: $CIRCLE_BRANCH"
-            fi
+            docker push "${IMAGE}:${ENV_TAG}"
+            docker push "${IMAGE}:${BRANCH_TAG}"
 
 workflows:
-  test:
+  version: 2
+
+  main-qa:
     jobs:
-      - build-and-test
+      - qa:
+          filters:
+            branches:
+              only: main
+
+  staging-publish:
+    jobs:
+      - publish-image:
+          environment_tag: stage
+          filters:
+            branches:
+              only: staging
+
+  production-publish:
+    jobs:
+      - publish-image:
+          environment_tag: prod
+          filters:
+            branches:
+              only: prod
