@@ -4,20 +4,20 @@
 import time
 from uuid import uuid4
 
-import httpx
 import pytest
+from fastapi.testclient import TestClient
+
+from app.main import app
 
 
-BASE_URL = "http://localhost:8000"
-TIMEOUT = 10.0
+
 
 
 @pytest.fixture
 def client():
-    """Connect to the running FastAPI application."""
-    with httpx.Client(base_url=BASE_URL, timeout=TIMEOUT) as api:
+    """Test the FastAPI app in-process using real PostgreSQL and Redis."""
+    with TestClient(app) as api:
         yield api
-
 
 @pytest.fixture
 def existing_student(client):
