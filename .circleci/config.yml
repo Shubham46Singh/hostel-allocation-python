@@ -1,0 +1,215 @@
+version: 2.1
+
+jobs:
+  qa:
+    docker:
+      - image: cimg/python:3.12
+      - image: postgres:16.4-alpine
+        environment:
+          POSTGRES_DB: hostel
+          POSTGRES_USER: hostel
+          POSTGRES_PASSWORD: hostel_dev_password
+      - image: redis:7.4.0-alpine
+
+    environment:
+      DATABASE_URL: postgresql://hostel:hostel_dev_password@localhost:5432/hostel
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - checkout
+
+      - run:
+          name: Scan repository for secrets
+          command: |
+            set -eu
+            GITLEAKS_VERSION="8.24.2"
+            curl -sSfL \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+              -o /tmp/gitleaks.tar.gz
+            mkdir -p /tmp/gitleaks-bin
+            tar -xzf /tmp/gitleaks.tar.gz -C /tmp/gitleaks-bin gitleaks
+            /tmp/gitleaks-bin/gitleaks detect \
+              --source . \
+              --no-git \
+              --redact \
+              --exit-code 1 \
+              --gitleaks-ignore-path .
+
+      - run:
+          name: Install application and test dependencies
+          command: |
+            python -m pip install --upgrade pip
+            python -m pip install -r requirements.txt
+            python -m pip install pytest pytest-cov ruff httpx
+
+      - run:
+          name: Check code quality
+          command: python -m ruff check .
+
+      - run:
+          name: Run allocation unit tests
+          command: |
+            python -m pytest \
+              tests/test_allocate.py \
+              tests/test_allocation_flow.py \
+              -v
+
+      - run:
+          name: Wait for PostgreSQL and Redis
+          command: python .circleci/wait_for_services.py
+
+      - run:
+          name: Apply database migrations and seed data
+          command: python .circleci/migrate.py
+
+      - run:
+          name: Start API and run all tests with coverage
+          command: |
+            set -eu
+            python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 > /tmp/hostel-api.log 2>&1 &
+            API_PID=$!
+
+            cleanup() {
+              kill "$API_PID" 2>/dev/null || true
+            }
+            trap cleanup EXIT
+
+            for attempt in $(seq 1 30); do
+              if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=2)" 2>/dev/null; then
+                echo "FastAPI is ready."
+                set +e
+                python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=70 -v
+                TEST_STATUS=$?
+                set -e
+
+                if [ "$TEST_STATUS" -ne 0 ]; then
+                  echo "API server logs:"
+                  cat /tmp/hostel-api.log
+                fi
+
+                exit "$TEST_STATUS"
+              fi
+              sleep 2
+            done
+
+            echo "FastAPI failed to start."
+            cat /tmp/hostel-api.log
+            exit 1
+
+      - setup_remote_docker
+
+      - run:
+          name: Validate Docker Hub credentials
+          command: |
+            set -eu
+            test -n "${DOCKERHUB_USER:-}" || {
+              echo "ERROR: DOCKERHUB_USER is missing."
+              exit 1
+            }
+            test -n "${DOCKERHUB_TOKEN:-}" || {
+              echo "ERROR: DOCKERHUB_TOKEN is missing."
+              exit 1
+            }
+
+      - run:
+          name: Log in to Docker Hub
+          command: |
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login \
+              --username "$DOCKERHUB_USER" \
+              --password-stdin
+
+      - run:
+          name: Build QA Docker image
+          command: |
+            docker build -t "hostel-allocation:${CIRCLE_SHA1}" .
+
+      - run:
+          name: Tag and push QA images
+          command: |
+            set -eu
+            IMAGE="${DOCKERHUB_USER}/hostel-allocation-python"
+            SHORT_SHA="$(printf '%s' "$CIRCLE_SHA1" | cut -c1-7)"
+
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:qa"
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:main-${SHORT_SHA}"
+
+            docker push "${IMAGE}:qa"
+            docker push "${IMAGE}:main-${SHORT_SHA}"
+
+  publish-image:
+    parameters:
+      environment_tag:
+        type: string
+
+    docker:
+      - image: cimg/base:stable
+
+    steps:
+      - checkout
+      - setup_remote_docker
+
+      - run:
+          name: Validate Docker Hub credentials
+          command: |
+            set -eu
+            test -n "${DOCKERHUB_USER:-}" || {
+              echo "ERROR: DOCKERHUB_USER is missing."
+              exit 1
+            }
+            test -n "${DOCKERHUB_TOKEN:-}" || {
+              echo "ERROR: DOCKERHUB_TOKEN is missing."
+              exit 1
+            }
+
+      - run:
+          name: Log in to Docker Hub
+          command: |
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login \
+              --username "$DOCKERHUB_USER" \
+              --password-stdin
+
+      - run:
+          name: Build Docker image
+          command: |
+            docker build -t "hostel-allocation:${CIRCLE_SHA1}" .
+
+      - run:
+          name: Tag and push branch images
+          command: |
+            set -eu
+            IMAGE="${DOCKERHUB_USER}/hostel-allocation-python"
+            SHORT_SHA="$(printf '%s' "$CIRCLE_SHA1" | cut -c1-7)"
+            BRANCH_TAG="${CIRCLE_BRANCH}-${SHORT_SHA}"
+            ENV_TAG="<< parameters.environment_tag >>"
+
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:${ENV_TAG}"
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:${BRANCH_TAG}"
+
+            docker push "${IMAGE}:${ENV_TAG}"
+            docker push "${IMAGE}:${BRANCH_TAG}"
+
+workflows:
+  version: 2
+
+  main-qa:
+    jobs:
+      - qa:
+          filters:
+            branches:
+              only: main
+
+  staging-publish:
+    jobs:
+      - publish-image:
+          environment_tag: stage
+          filters:
+            branches:
+              only: staging
+
+  production-publish:
+    jobs:
+      - publish-image:
+          environment_tag: prod
+          filters:
+            branches:
+              only: prod
