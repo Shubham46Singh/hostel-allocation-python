@@ -232,6 +232,39 @@ def test_mutual_chain_forms_groups_without_exceeding_capacity():
     assert bumped[0]["reason"] == "outranked"
 
 
+def test_five_mutual_friends_competing_for_room_of_four():
+    """The fifth friend is bumped by the fourth in a mutual chain."""
+    students = [
+        student(1, merit=95, wants=[2]),
+        student(2, merit=90, wants=[1, 3]),
+        student(3, merit=85, wants=[2, 4]),
+        student(4, merit=80, wants=[3, 5]),
+        student(5, merit=60, wants=[4]),
+    ]
+
+    groups, bumped = form_groups(students, max_size=4)
+
+    assert groups == [[1, 2, 3, 4], [5]]
+    assert all(len(group) <= 4 for group in groups)
+
+    # Each student appears in exactly one group.
+    all_grouped = [sid for group in groups for sid in group]
+    assert sorted(all_grouped) == [1, 2, 3, 4, 5]
+    assert len(all_grouped) == len(set(all_grouped))
+
+    # The fifth student loses the place to student 4.
+    assert len(bumped) == 1
+    assert bumped[0]["student"] == 5
+    assert bumped[0]["blocked_by"] == 4
+    assert bumped[0]["reason"] == "outranked"
+    assert bumped[0]["group"] == [1, 2, 3, 4]
+
+    # Identical input must always produce identical output.
+    groups_again, bumped_again = form_groups(students, max_size=4)
+    assert groups_again == groups
+    assert bumped_again == bumped
+
+
 def test_group_formation_rejects_zero_maximum_size():
     with pytest.raises(AllocationError):
         form_groups([student(1)], max_size=0)
