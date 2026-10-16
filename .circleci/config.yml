@@ -30,6 +30,22 @@ jobs:
           command: python -m ruff check .
 
       - run:
+          name: Scan repository for secrets
+          command: |
+            set -eu
+            GITLEAKS_VERSION="8.24.2"
+            curl -sSfL \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+              -o /tmp/gitleaks.tar.gz
+            mkdir -p /tmp/gitleaks-bin
+            tar -xzf /tmp/gitleaks.tar.gz -C /tmp/gitleaks-bin gitleaks
+            /tmp/gitleaks-bin/gitleaks detect \
+              --source . \
+              --no-git \
+              --redact \
+              --exit-code 1
+
+      - run:
           name: Run allocation unit tests
           command: python -m pytest tests/test_allocate.py tests/test_allocation_flow.py -v
 
@@ -42,8 +58,9 @@ jobs:
           command: python .circleci/migrate.py
 
       - run:
-          name: Start API and run all tests
+          name: Start API and run all tests with coverage
           command: |
+            set -u
             python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/hostel-api.log 2>&1 &
             API_PID=$!
 
@@ -55,9 +72,10 @@ jobs:
             for attempt in $(seq 1 30); do
               if python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)" 2>/dev/null; then
                 echo "FastAPI is ready."
-
-                python -m pytest -v
+                set +e
+                python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=70 -v
                 TEST_STATUS=$?
+                set -e
 
                 if [ "$TEST_STATUS" -ne 0 ]; then
                   echo "API server logs:"
@@ -78,7 +96,8 @@ jobs:
 
       - run:
           name: Build Docker image
-          command: docker build -t hostel-allocation:${CIRCLE_SHA1} .
+          command: |
+            docker build -t "hostel-allocation:${CIRCLE_SHA1}" .
 
       - run:
           name: Log in to Docker Hub
@@ -99,19 +118,22 @@ jobs:
           command: |
             set -eu
 
-            docker tag "hostel-allocation:${CIRCLE_SHA1}" \
-              "vedanth02/hostel-allocation-python:${CIRCLE_SHA1}"
+            IMAGE="vedanth02/hostel-allocation-python"
 
-            docker tag "hostel-allocation:${CIRCLE_SHA1}" \
-              "vedanth02/hostel-allocation-python:latest"
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:${CIRCLE_SHA1}"
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:latest"
+            docker tag "hostel-allocation:${CIRCLE_SHA1}" "${IMAGE}:1.0"
 
       - run:
-          name: Push Docker image to Docker Hub
+          name: Push Docker images to Docker Hub
           command: |
             set -eu
 
-            docker push "vedanth02/hostel-allocation-python:${CIRCLE_SHA1}"
-            docker push "vedanth02/hostel-allocation-python:latest"
+            IMAGE="vedanth02/hostel-allocation-python"
+
+            docker push "${IMAGE}:${CIRCLE_SHA1}"
+            docker push "${IMAGE}:latest"
+            docker push "${IMAGE}:1.0"
 
 workflows:
   test:
