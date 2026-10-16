@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hostel-migrate
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: hostel-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: postgres:16.4-alpine
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              for file in /migrations/*.sql; do
+                echo "Applying $file"
+                psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file"
+              done
+          env:
+            - name: DATABASE_URL
+              value: postgresql://hostel:hostel_dev_password@db:5432/hostel
+          volumeMounts:
+            - name: migrations
+              mountPath: /migrations
+              readOnly: true
+      volumes:
+        - name: migrations
+          configMap:
+            name: hostel-migrations
