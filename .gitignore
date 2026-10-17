@@ -11,3 +11,9 @@ test-results/
 gitleaks.json
 .env
 .DS_Store
+
+# Python virtual environments
+.venv/
+.venv*/
+venv/
+__pycache__/
