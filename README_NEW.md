@@ -430,3 +430,6 @@ Developed as a practical project demonstrating backend API development, database
 - Docker Compose: docker compose ps
 - Application health: http://localhost:8080/health
 - Kubernetes pods: kubectl get pods -A
+
+## Interview Practice
+- Verify the CircleCI pipeline after merging a pull request.
