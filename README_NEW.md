@@ -426,3 +426,7 @@ The Hostel Room Allocation System has been implemented and exercised through its
 ## 👨‍💻 Author
 
 Developed as a practical project demonstrating backend API development, database integration, containerization, automated testing, CI/CD automation, and Kubernetes deployment.
+## Presentation Verification
+- Docker Compose: docker compose ps
+- Application health: http://localhost:8080/health
+- Kubernetes pods: kubectl get pods -A
