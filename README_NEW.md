@@ -433,3 +433,5 @@ Developed as a practical project demonstrating backend API development, database
 
 ## Interview Practice
 - Verify the CircleCI pipeline after merging a pull request.
+
+Interview demo: testing the pull request and CircleCI pipeline.
